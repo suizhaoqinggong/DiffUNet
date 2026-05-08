@@ -1,0 +1,33 @@
+[project]
+name = "diffunet"
+version = "0.1.0"
+requires-python = ">=3.10,<3.12"
+
+dependencies = [
+    "torch>=2.1.0,<2.2",
+    "monai",
+    "dynamic-network-architectures",
+    "batchgenerators>=0.25",
+    "SimpleITK",
+    "medpy",
+    "nibabel",
+    "tqdm",
+    "numpy",
+    "scipy",
+    "acvl-utils",
+    "tensorboard",
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu121" }
+
+# 默认源：清华 PyPI 镜像
+[[tool.uv.index]]
+name = "tsinghua"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
+
+# PyTorch CUDA 12.1 whl（与 NVIDIA 驱动 12.2 兼容，CUDA 没有国内镜像）
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"

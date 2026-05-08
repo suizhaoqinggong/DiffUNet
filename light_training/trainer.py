@@ -12,7 +12,8 @@ from .sampler import SequentialDistributedSampler, distributed_concat
 from torch.utils.tensorboard import SummaryWriter
 from torch.cuda.amp import GradScaler
 from torch import autocast, nn
-import time 
+import time
+from datetime import datetime
 
 class dummy_context(object):
     def __enter__(self):
@@ -334,16 +335,18 @@ class Trainer:
                 print(f"model parameters is {para * 4 / 1000 / 1000}M ")        
                 
         self.global_step = 0
+        run_logdir = os.path.join(self.logdir, datetime.now().strftime("%Y%m%d-%H%M%S"))
+
         if self.env_type == "pytorch":
             if self.model is not None:
                 self.model.to(self.device)
-            os.makedirs(self.logdir, exist_ok=True)
-            self.writer = SummaryWriter(self.logdir)
+            os.makedirs(run_logdir, exist_ok=True)
+            self.writer = SummaryWriter(run_logdir)
 
         elif self.ddp:
             if self.local_rank == 0:
-                os.makedirs(self.logdir, exist_ok=True)
-                self.writer = SummaryWriter(self.logdir)
+                os.makedirs(run_logdir, exist_ok=True)
+                self.writer = SummaryWriter(run_logdir)
             else:
                 self.writer = None
             if self.model is not None:
@@ -352,7 +355,7 @@ class Trainer:
                 self.model = torch.nn.parallel.DistributedDataParallel(self.model,
                                                                     device_ids=[self.local_rank],
                                                                     output_device=self.local_rank,
-                                                                    find_unused_parameters=True)  
+                                                                    find_unused_parameters=True)
         else :
             print("not support env_type")
             exit(0)

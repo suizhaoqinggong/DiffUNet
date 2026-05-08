@@ -9,21 +9,22 @@ import os
 from light_training.prediction import Predictor
 
 
-data_dir = "./data/fullres/train"
+data_dir = "/home/cjh/data/fullres/train"
 env = "pytorch"
 max_epoch = 1000
-batch_size = 2
+batch_size = 8
 val_every = 2
 num_gpus = 1
-device = "cuda:6"
+device = "cuda:0"
 patch_size = [128, 128, 128]
 
 class BraTSTrainer(Trainer):
-    def __init__(self, env_type, max_epochs, batch_size, device="cpu", val_every=1, num_gpus=1, logdir="./logs/", master_ip='localhost', master_port=17750, training_script="train.py"):
+    def __init__(self, env_type, max_epochs, batch_size, device="cpu", val_every=1, num_gpus=1, logdir="./logs/", master_ip='localhost', master_port=17750, training_script="train.py", use_pr25_boundary=False):
         super().__init__(env_type, max_epochs, batch_size, device, val_every, num_gpus, logdir, master_ip, master_port, training_script)
-        
+
         self.patch_size = patch_size
         self.augmentation = False
+        self.use_pr25_boundary = use_pr25_boundary
         
 
     def convert_labels(self, labels):
@@ -41,11 +42,11 @@ class BraTSTrainer(Trainer):
         
         return image, label, properties 
 
-    def define_model_diffunet(self):
+    def define_model_diffunet(self, use_pr25_boundary=False):
         from diffunet.diffunet_model import DiffUNet
-        model = DiffUNet(4, 4)
+        model = DiffUNet(4, 4, use_pr25_boundary=use_pr25_boundary)
                 
-        model_path = ""
+        model_path = "/home/cjh/DiffUNet/logs/diffunet/model/best_model_0.8887.pt"
         new_sd = self.filte_state_dict(torch.load(model_path, map_location="cpu"))
         model.load_state_dict(new_sd)
         model.eval()
@@ -73,7 +74,7 @@ class BraTSTrainer(Trainer):
     def validation_step(self, batch):
         image, label, properties = self.get_input(batch)
         ddim = True
-        model, predictor, save_path = self.define_model_diffunet()
+        model, predictor, save_path = self.define_model_diffunet(use_pr25_boundary=self.use_pr25_boundary)
         
         if ddim:
             model_output = predictor.maybe_mirror_and_predict(image, model, device=device, ddim=True)

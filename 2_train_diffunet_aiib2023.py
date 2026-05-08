@@ -61,7 +61,7 @@ class BraTSTrainer(Trainer):
 
         scale = func(self.epoch, max_epoch)
 
-        loss = loss.mean() + loss_edge.mean() + (loss * uncertainty).mean() * scale
+        loss = loss.mean() + loss_edge.mean() + (loss.detach() * uncertainty).mean() * scale
 
         self.log("training_loss", loss.mean(), step=self.global_step)
         self.log("training_loss_edge", loss_edge.mean(), step=self.global_step)

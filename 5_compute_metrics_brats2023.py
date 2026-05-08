@@ -38,19 +38,23 @@ def each_cases_metric(gt, pred, voxel_spacing):
     print(class_wise_metric)
     return class_wise_metric
 
-def convert_labels(labels):
+def convert_labels(labels, from_raw=False):
     ## TC, WT and ET
     labels = labels.unsqueeze(dim=0)
 
-    result = [(labels == 1) | (labels == 3), (labels == 1) | (labels == 3) | (labels == 2), labels == 3]
-    
+    et_label = 4 if from_raw else 3  # raw BraTS uses 4, preprocessed uses 3
+
+    result = [(labels == 1) | (labels == et_label),
+              (labels == 1) | (labels == et_label) | (labels == 2),
+              labels == et_label]
+
     return torch.cat(result, dim=0).float()
 
 
 if __name__ == "__main__":
-    data_dir = "./data/fullres/train"
-    raw_data_dir = "./data/raw_data/ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData/"
-    from data.test_list import test_list
+    data_dir = "/home/cjh/data/fullres/train"
+    raw_data_dir = "/home/cjh/data/BraTS2021/"
+    from test_list_brats2023 import test_list
     train_ds, test_ds = get_train_test_loader_from_test_list(data_dir, test_list=test_list)
     print(len(test_ds))
     all_results = np.zeros((250,3,2))
@@ -59,12 +63,12 @@ if __name__ == "__main__":
     for batch in tqdm(test_ds, total=len(test_ds)):
         properties = batch["properties"]
         case_name = properties["name"]
-        gt_itk = os.path.join(raw_data_dir, case_name, f"seg.nii.gz")
+        gt_itk = os.path.join(raw_data_dir, case_name, f"truth.nii.gz")
         voxel_spacing = [1, 1, 1]
         gt_itk = sitk.ReadImage(gt_itk)
         gt_array = sitk.GetArrayFromImage(gt_itk).astype(np.int32)
         gt_array = torch.from_numpy(gt_array)
-        gt_array = convert_labels(gt_array).numpy()
+        gt_array = convert_labels(gt_array, from_raw=True).numpy()
         pred_itk = sitk.ReadImage(f"./{results_root}/{pred_name}/{case_name}.nii.gz")
         pred_array = sitk.GetArrayFromImage(pred_itk)
 

@@ -1,7 +1,8 @@
 import numpy as np
-from light_training.dataloading.dataset import get_train_test_loader_from_test_list
-import torch 
-import torch.nn as nn 
+from light_training.dataloading.dataset import get_train_val_test_loader_from_train
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from monai.inferers import SlidingWindowInferer
 from light_training.evaluation.metric import dice
 from light_training.trainer import Trainer
@@ -12,7 +13,7 @@ import os
 def func(m, epochs):
     return np.exp(-10*(1- m / epochs)**2)
 
-data_dir = "./data/fullres/train"
+data_dir = "/home/cjh/data/fullres/train"
 
 fold = 0
 
@@ -24,13 +25,13 @@ max_epoch = 1000
 batch_size = 2
 val_every = 2
 num_gpus = 1
-device = "cuda:0"
+device = "cuda:1"
 patch_size = [128, 128, 128]
 # patch_size = [96, 96, 96]
 augmentation = True 
     
 class BraTSTrainer(Trainer):
-    def __init__(self, env_type, max_epochs, batch_size, device="cpu", val_every=1, num_gpus=1, logdir="./logs/", master_ip='localhost', master_port=17750, training_script="train.py"):
+    def __init__(self, env_type, max_epochs, batch_size, device="cpu", val_every=1, num_gpus=1, logdir="./logs/", master_ip='localhost', master_port=17750, training_script="train.py", use_pr25_boundary=True):
         super().__init__(env_type, max_epochs, batch_size, device, val_every, num_gpus, logdir, master_ip, master_port, training_script)
         self.window_infer = SlidingWindowInferer(roi_size=patch_size,
                                         sw_batch_size=2,
@@ -39,15 +40,18 @@ class BraTSTrainer(Trainer):
         self.augmentation = augmentation
         self.train_process = 12
 
+        self.use_pr25_boundary = use_pr25_boundary
+
         from diffunet.diffunet_model import DiffUNet
-        self.model = DiffUNet(4, 4)
-        
+        self.model = DiffUNet(4, 4, use_pr25_boundary=use_pr25_boundary)
+
         self.best_mean_dice = 0.0
         self.optimizer = torch.optim.SGD(self.model.parameters(), lr=1e-2, weight_decay=3e-5,
                                     momentum=0.99, nesterov=True)
         self.scheduler_type = "poly"
-        
+
         self.loss_func = nn.CrossEntropyLoss()
+        self.lambda_pr25 = 1.0
 
       
     def convert_labels(self, labels):
@@ -58,21 +62,26 @@ class BraTSTrainer(Trainer):
 
     
     def training_step(self, batch):
-        import time 
         image, label = self.get_input(batch)
 
-        pred, pred_edge, uncertainty = self.model(image, label)
+        pred, pred_edge_or_boundary, uncertainty = self.model(image, label)
         uncertainty = torch.clamp(uncertainty, 0.0, 1.0)
 
-        loss = self.loss_func(pred, label)
-        loss_edge = self.loss_func(pred_edge, label)
-
+        loss_main = self.loss_func(pred, label)
         scale = func(self.epoch, max_epoch)
 
-        loss = loss.mean() + loss_edge.mean() + (loss * uncertainty).mean() * scale
+        if self.use_pr25_boundary:
+            from diffunet.boundary_utils import compute_boundary_gt
+            boundary_gt = compute_boundary_gt(label, num_classes=4)
+            loss_boundary = F.mse_loss(torch.sigmoid(pred_edge_or_boundary), boundary_gt)
+            loss = loss_main.mean() + self.lambda_pr25 * loss_boundary.mean() + (loss_main.detach() * uncertainty).mean() * scale
+            self.log("training_loss_boundary", loss_boundary.mean(), step=self.global_step)
+        else:
+            loss_edge = self.loss_func(pred_edge_or_boundary, label)
+            loss = loss_main.mean() + loss_edge.mean() + (loss_main.detach() * uncertainty).mean() * scale
+            self.log("training_loss_edge", loss_edge.mean(), step=self.global_step)
 
         self.log("training_loss", loss.mean(), step=self.global_step)
-        self.log("training_loss_edge", loss_edge.mean(), step=self.global_step)
 
         return loss 
 
@@ -164,7 +173,9 @@ if __name__ == "__main__":
                             master_port=17753,
                             training_script=__file__)
 
-    from test_list_brats2023 import test_list
-    train_ds, test_ds = get_train_test_loader_from_test_list(data_dir=data_dir, test_list=test_list)
+    import random
+    random.seed(37)
+    from light_training.dataloading.dataset import get_train_val_test_loader_from_train
+    train_ds, test_ds, _ = get_train_val_test_loader_from_train(data_dir=data_dir, train_rate=0.8, val_rate=0.2, test_rate=0.0)
 
     trainer.train(train_dataset=train_ds, val_dataset=test_ds)

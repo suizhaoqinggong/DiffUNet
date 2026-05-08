@@ -319,34 +319,31 @@ class PlainConvUNet(nn.Module):
 
         uncer_step = self.uncer_step
         with torch.no_grad():
-            times = torch.zeros((image.shape[0]*uncer_step,), device=device).float().uniform_(self.sample_range[0],
-                                                                    self.sample_range[1])  # [bs]
-            # random noise
-            gt = gt.long()
-            gt = self.embedding_table(gt)
-            gt = gt.squeeze(dim=1).permute(0, 4, 1, 2, 3)
-            gt = (torch.sigmoid(gt) * 2 - 1) * self.bit_scale
+            preds = []
+            for _ in range(uncer_step):
+                times = torch.zeros((image.shape[0],), device=device).float().uniform_(
+                    self.sample_range[0], self.sample_range[1])
 
-            gt = gt.repeat(uncer_step, 1, 1, 1, 1)
-            noise = torch.randn_like(gt)
+                gt_single = gt.long()
+                gt_single = self.embedding_table(gt_single)
+                gt_single = gt_single.squeeze(dim=1).permute(0, 4, 1, 2, 3)
+                gt_single = (torch.sigmoid(gt_single) * 2 - 1) * self.bit_scale
 
-            noise_level = self.log_snr(times)
-            padded_noise_level = self.right_pad_dims_to(image, noise_level)
-            alpha, sigma = log_snr_to_alpha_sigma(padded_noise_level)
-            noised_gt = alpha * gt + sigma * noise
+                noise = torch.randn_like(gt_single)
 
-            image = image.repeat(uncer_step, 1, 1, 1, 1)
+                noise_level = self.log_snr(times)
+                padded_noise_level = self.right_pad_dims_to(image, noise_level)
+                alpha, sigma = log_snr_to_alpha_sigma(padded_noise_level)
+                noised_gt = alpha * gt_single + sigma * noise
 
-            image = torch.cat([image, noised_gt], dim=1)
+                image_input = torch.cat([image, noised_gt], dim=1)
+                times_input = self.time_mlp(times)
 
-            times = self.time_mlp(times)
+                skips = self.encoder(image_input, times_input, embeddings=embeddings)
+                pred = self.decoder(skips, times_input)
+                preds.append(pred)
 
-            skips = self.encoder(image, times, embeddings=embeddings)
-            
-            pred = self.decoder(skips, times)
-            
-            bu, c, d, h, w = pred.shape
-            pred = pred.reshape((-1, uncer_step, c, d, h, w))
+            pred = torch.stack(preds, dim=1)  # [B, uncer_step, C, D, H, W]
             pred_mean = pred.mean(dim=1)
             uncertainty = self.compute_uncer(pred_mean)
 
