@@ -18,6 +18,9 @@ dependencies = [
     "tensorboard",
 ]
 
+[tool.uv]
+constraint-dependencies = ["setuptools<70"]
+
 [tool.uv.sources]
 torch = { index = "pytorch-cu121" }
 
